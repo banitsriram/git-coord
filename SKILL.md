@@ -1,89 +1,101 @@
 ---
 name: git-coord
-description: Coordinate with another Claude agent working in the same git repo — see who is doing what, claim files before editing, leave messages, and avoid overlapping commits. Use at session start, before starting any task, and before every commit or push in a repo that has a .coord/ directory, or whenever the user says another agent or Claude account is working on the same project.
+description: Coordinate with other Claude agents working in the same git repo — see who is doing what, claim files before editing, take tasks from a shared queue, leave messages, and avoid overlapping commits. Use at session start, before starting any task, and before every commit or push in a repo that has a .coord/ directory, or whenever the user says another agent or Claude account is working on the same project.
 ---
 
 # Git coordination between agents
 
-Several agents share one repo and one branch. Git is the message bus. Each agent owns exactly one file, `.coord/<name>.md`, and never edits anyone else's, so the coordination files themselves never conflict.
+Several agents share one repo and one branch. Git is the message bus. Each agent owns one file, `.coord/<name>.md`, and never edits anyone else's. Tasks live in `.coord/tasks/`. Everything is read from what has been **pushed**, so unpublished changes don't count.
 
-## Identity
-
-Your name is `git config coord.agent`. If it's empty, ask the user for a short name (e.g. `alpha`, `beta`) and run `git config coord.agent <name>`. Every agent works in its own clone: never two agents in one folder.
-
-## Sync
+All commands below use the script that sits next to this file:
 
 ```bash
-git pull --rebase --autostash -q; for f in .coord/*.md; do echo "=== $f"; cat "$f"; done; git log --oneline -15
+python3 ~/.claude/skills/git-coord/coord.py <command>
 ```
 
-Run it at session start, before claiming, before every push, and after finishing each task. Each time, read the other agents' files: their `claims`, their `status`, and any message addressed to `@<your name>`. Act on messages for you before continuing.
+If the skill is installed somewhere else, use that path instead.
 
-## Your status file
+## Setup (once per clone)
 
-`.coord/<name>.md`. Keep it short:
+If `git config coord.agent` is empty, ask the user for a short name (`alpha`, `beta`, …) and run `coord.py init <name>`. That names the clone, creates your file, installs a git pre-commit guard and publishes. Every agent needs its own clone: never two agents in one folder.
+
+## Status
+
+`coord.py status` shows each agent's status, task, claims and last push, any claim conflicts, ready tasks, messages for you, and other agents' recent commits. It runs automatically at session start if the hooks are installed. Run it yourself before picking a task, before every push, and after finishing a task. Act on messages for you before continuing. If it says you're behind, run `git pull --rebase --autostash`.
+
+## Your file
 
 ```markdown
 # alpha
-updated: 2026-11-06 14:05 UTC
-status: working          # working | blocked | idle
-task: Login form validation
+status: working        # working | blocked | paused | idle
+task: alpha-3 Login form validation
 claims:
 - src/auth/
 - src/components/LoginForm.tsx
+- docs/*.md
 done:
-- Added /api/login route (a1b2c3d)
+- alpha-2 Added /api/login route (a1b2c3d)
 messages:
-- 14:05 @beta: renamed User.name -> User.displayName in src/types.ts, pull before using it
+- alpha-3 @beta: renamed User.name -> User.displayName in src/types.ts, pull before using it
 ```
 
-## Publish your file
+After any change to it, run `coord.py publish "<what changed>"`. This commits only your file and `.coord/tasks/`, rebases and pushes; your work in progress stays uncommitted.
 
-After every change to your file:
+## Claims
 
-```bash
-n=$(git config coord.agent); git add ".coord/$n.md" && git commit -qm "coord($n): <what changed>" -- ".coord/$n.md" && git pull --rebase --autostash -q && git push -q
-```
-
-This commits only your coord file; your work in progress stays uncommitted. If the push is rejected, run the last two steps again.
-
-## Claim before you edit
-
-1. Sync.
-2. If a path you need is in another agent's `claims` (the same file, or inside a claimed folder), don't touch it. Pick a different task, or post `@them` asking them to release it or make the change, and tell the user.
-3. Otherwise add your paths to `claims`, set `task`, `status: working` and `updated`, then publish.
-4. Sync again. If another agent claimed an overlapping path at the same moment, the claim whose commit comes later in `git log` loses: remove yours, publish, and pick something else.
+1. Run status. If a path you need is claimed by someone else, don't touch it. Pick other work, or message them asking them to release it.
+2. Add your paths to `claims` (a file, a folder, or a glob like `src/**/*.test.ts`), set `task` and `status: working`, then publish.
+3. If two agents claim the same path, whoever published first keeps it. Status prints `CONFLICT` and says who won. If it was them, remove yours and publish.
 
 Claim the narrowest set of paths that covers the task. Hot shared files (package.json, lockfiles, route tables, shared type indexes) are claimed only for the moment you edit them: claim, edit, commit, release.
 
-Need to edit a file you didn't plan on? Claim it first, same steps.
+Need to edit a file you didn't plan on? Claim it first.
 
-If the `check_claims.py` hook is installed, it enforces this: an edit is blocked unless the file is in your *published* claims and in no one else's. A block message names the rule you hit. Follow it; don't try to get around it with shell commands.
+With the hooks installed this is enforced. Claude's edit tools and `git commit` are blocked for any file that is outside your published claims or claimed first by someone else. A block message tells you which rule you hit. Follow it. Never get around it with shell commands or `--no-verify` unless the user tells you to.
 
-## Commit and push work
+## Tasks
 
-- Small, complete commits that build. Prefix messages with your name: `alpha: add login validation`.
-- Push soon after each commit; don't sit on local commits:
-  ```bash
-  git pull --rebase --autostash && git push
-  ```
-- Rebase conflict in a file another agent claims: `git rebase --abort`, message them, tell the user. Conflict in your own claimed file: resolve it.
-- Never force-push the shared branch. Never rewrite another agent's commits.
+The shared queue is one file per task, `.coord/tasks/<id>.md`. Ids are `<your name>-<n>`, so two agents can never pick the same id.
 
-## Finishing a task
+```markdown
+# alpha-4: Add logout button
+status: open           # open | done
+blocked_by: alpha-3
+What to build, acceptance criteria, files it will likely touch.
+```
 
-Move it to `done` with the commit hash, remove its claims, set `status: idle` (or the next `task` and its claims), and publish. Keep only the last ~5 `done` items.
+- **Take a task:** pick one that status lists as `ready`, set `task: <id> <title>` and its claims, and publish. If status says someone took it first, pick another.
+- **Add a task:** any time you find work outside your current task, write a task file instead of doing it now, then publish.
+- **Finish a task:** set the task file to `status: done`, move the task to `done` with the commit hash, release its claims, and publish. Keep only the last ~5 `done` items.
+
+If the repo has no tasks, take work from the user as usual. You still claim files.
+
+## Commits
+
+- Small, complete commits that build. Prefix every message with your name: `alpha: add login validation`. Status uses that prefix to show who did what.
+- Push soon after each commit: `git pull --rebase --autostash && git push`.
+- Rebase conflict in a file someone else claims: `git rebase --abort`, message them, tell the user. Conflict in your own claimed file: resolve it.
+- Never force-push the shared branch, and never rewrite other agents' commits.
 
 ## Messages
 
-- Write them in your own file under `messages`, addressed `@name`. Use them for interface changes others depend on, handoffs, requests to release a claim, and questions.
+- Write them in your own file under `messages`, addressed `@name`, or `@all` for everyone. Start a message with the task id it's about.
+- Use them for interface changes others depend on, handoffs, requests to release a claim, and questions.
 - Reply in your own file. Delete your own messages once the recipient has replied or acted on them.
-- The other agent only sees a message at its next sync. Never loop waiting for a reply: keep working on something unblocked, or set `status: blocked` and tell the user.
+- With the hooks installed, new messages for you appear automatically when the user sends a prompt. Otherwise you see them in status. Never loop waiting for a reply: work on something unblocked, or set `status: blocked` and tell the user.
 
-## Stale claims
+## Stale agents
 
-If another agent's `updated` is more than 2 hours old and its status isn't `idle`, its claims may be abandoned. Don't override them yourself: tell the user and let them decide.
+Status marks an agent `STALE` when it isn't idle and hasn't pushed in 2 hours. Its claims still hold. Tell the user and let them decide; never take over yourself. Publish at least hourly during long tasks, even just a progress note, so you don't look stale.
 
-## First use in a repo
+## Ending a session
 
-If `.coord/` doesn't exist, create your file and publish it. Suggest the user add this line to the repo's CLAUDE.md so every agent loads this skill: `This repo is shared with other Claude agents. Use the git-coord skill.`
+Before you stop:
+- push finished work;
+- update `done`;
+- release claims you won't come back to;
+- set `status` to `idle`, or to `paused` with a short note about where you left off if you'll resume;
+- answer messages for you;
+- publish.
+
+Never leave local commits unpushed.

@@ -1,6 +1,6 @@
 # biyon-5: [A] Pipeline 1: fetch #941/#1793, groups.yaml, track→stem split, excerpt, humanise
 status: open
-blocked_by: biyon-1
+blocked_by: 
 owner: A (biyon)
 size: M (0.5 day) | critical path
 features: F01

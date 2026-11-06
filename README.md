@@ -7,7 +7,7 @@ A Claude Code skill that lets two or more Claude agents work on the same repo wi
 On each Claude account, clone this repo into its skills folder:
 
 ```bash
-git clone <this-repo-url> ~/.claude/skills/git-coord
+git clone https://github.com/banitsriram/git-coord.git ~/.claude/skills/git-coord
 ```
 
 Update later with `git -C ~/.claude/skills/git-coord pull`.

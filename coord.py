@@ -333,7 +333,7 @@ def init(name):
         os.makedirs(os.path.dirname(f), exist_ok=True)
         with open(f, "w") as fh:
             fh.write(TEMPLATE.format(name=name))
-    hook, line = c.gitpath("hooks/pre-commit"), f'python3 "{SELF}" pre-commit || exit 1'
+    hook, line = c.gitpath("hooks/pre-commit"), f'"{sys.executable}" "{SELF}" pre-commit || exit 1'
     if os.path.exists(hook):
         with open(hook) as fh:
             if SELF not in fh.read():
@@ -361,7 +361,7 @@ def edit_hook(data):
     c = Coord(d)
     if not c.load():
         return 0
-    rel = os.path.relpath(path, c.root)
+    rel = os.path.relpath(path, c.root).replace(os.sep, "/")
     if c.ok("check-ignore", "-q", rel):
         return 0
     msg = c.check(rel)

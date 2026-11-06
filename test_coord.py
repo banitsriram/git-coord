@@ -24,7 +24,7 @@ def cli(clone, *args):
 
 def fresh(clone):
     """Pretend the last fetch was long ago, so hooks see the latest pushes."""
-    fh = os.path.join(clone, ".git", "FETCH_HEAD")
+    fh = os.path.join(clone, ".git", "coord-fetched")
     if os.path.exists(fh):
         os.remove(fh)
 
@@ -136,6 +136,20 @@ with tempfile.TemporaryDirectory() as t:
     out = cli(a, "status")[1]
     assert "Messages for you" in out and "renamed User.name" in out, out
     assert "beta: add button" in out, "others' work commits shown: " + out
+
+    # tool-hook: same messages mid-turn, as PostToolUse additionalContext, fetched in the background.
+    set_file(b, "beta", task="ui", claims=["src/ui/"], messages=["@alpha: mid-turn ping"])
+    seen = None
+    for _ in range(20):
+        out = hook("tool-hook", a)[1]
+        if out:
+            seen = json.loads(out)["hookSpecificOutput"]
+            break
+        time.sleep(0.25)  # the first call only starts the fetch; a later call reads its result
+    assert seen and seen["hookEventName"] == "PostToolUse" and "mid-turn ping" in seen["additionalContext"], seen
+    r = subprocess.run([sys.executable, COORD, "tool-hook"], input=json.dumps({"cwd": a}),
+                       capture_output=True, text=True, env=ENV)
+    assert r.stdout == "", "shown once: " + r.stdout
 
     # Tasks: ready queue respects blockers and claims.
     write(a, ".coord/tasks/alpha-1.md", "# alpha-1: Add login API\nstatus: open\n")

@@ -10,6 +10,7 @@ Hooks:
   coord.py edit-hook      Claude PreToolUse: block edits outside your published claims or inside someone else's
   coord.py session-hook   Claude SessionStart: print status
   coord.py prompt-hook    Claude UserPromptSubmit: print messages for you that you haven't seen yet
+  coord.py tool-hook      Claude PostToolUse: same, mid-turn, after any tool call (fetches in the background)
   coord.py pre-commit     git pre-commit: the edit rule, for every staged file (catches shell edits too)
 
 Everything is read from the upstream branch, i.e. what everyone has pushed.
@@ -121,14 +122,22 @@ class Coord:
     def gitpath(self, name):
         return os.path.join(self.root or "", self.g("rev-parse", "--git-path", name) or os.path.join(".git", name))
 
-    def load(self, force=False):
-        """Fetch (throttled) and read everyone's file. True if this repo uses git-coord."""
+    def load(self, force=False, background=False):
+        """Fetch (throttled) and read everyone's file. True if this repo uses git-coord.
+
+        background=True starts the fetch without waiting and reads what's already fetched,
+        so the result shows up on the next call instead of slowing this one down."""
         if not (self.root and self.up):
             return False
         # ponytail: throttled fetch, so the hooks may see claims up to FETCH_EVERY seconds old
-        fh = self.gitpath("FETCH_HEAD")
-        if force or not os.path.exists(fh) or time.time() - os.path.getmtime(fh) > FETCH_EVERY:
-            subprocess.run(["git", "fetch", "-q"], cwd=self.root, capture_output=True)
+        stamp = self.gitpath("coord-fetched")
+        if force or not os.path.exists(stamp) or time.time() - os.path.getmtime(stamp) > FETCH_EVERY:
+            open(stamp, "w").close()
+            if background:
+                subprocess.Popen(["git", "fetch", "-q"], cwd=self.root, start_new_session=True,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.run(["git", "fetch", "-q"], cwd=self.root, capture_output=True)
         for f in (self.g("ls-tree", "--name-only", self.up, ".coord/") or "").splitlines():
             if f.endswith(".md"):
                 self.agents[f[len(".coord/"):-3]] = parse(self.g("show", f"{self.up}:{f}") or "")
@@ -396,11 +405,15 @@ def main(argv):
             print(status_text(c))
             print("This repo uses the git-coord skill: claim files before editing, publish after changing your .coord file.")
         return 0
-    if cmd == "prompt-hook":
-        if c.load() and c.me:
+    if cmd in ("prompt-hook", "tool-hook"):
+        if c.load(background=cmd == "tool-hook") and c.me:
             new = c.unseen()
             if new:
-                print("git-coord: new messages for you:\n" + "\n".join(f"  from {n}: {m}" for n, m in new))
+                text = "git-coord: new messages for you:\n" + "\n".join(f"  from {n}: {m}" for n, m in new)
+                if cmd == "prompt-hook":
+                    print(text)
+                else:
+                    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}}))
         return 0
     if cmd == "status":
         if not c.load(force=True):

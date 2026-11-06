@@ -82,7 +82,7 @@ If the repo has no tasks, take work from the user as usual. You still claim file
 - Write them in your own file under `messages`, addressed `@name`, or `@all` for everyone. Start a message with the task id it's about.
 - Use them for interface changes others depend on, handoffs, requests to release a claim, and questions.
 - Reply in your own file. Delete your own messages once the recipient has replied or acted on them.
-- With the hooks installed, new messages for you appear automatically when the user sends a prompt. Otherwise you see them in status. Never loop waiting for a reply: work on something unblocked, or set `status: blocked` and tell the user.
+- With the hooks installed, new messages for you appear automatically, both when the user sends a prompt and mid-turn after your tool calls. Read and act on them when they appear. Without the hooks you see them in status. Never loop waiting for a reply: work on something unblocked, or set `status: blocked` and tell the user.
 
 ## Stale agents
 

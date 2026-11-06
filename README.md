@@ -5,7 +5,7 @@ A Claude Code skill that lets several Claude agents (separate accounts, machines
 - **Claims.** Each agent claims files, folders or globs before editing them. Hooks block edits and commits outside your claims or inside someone else's. If two agents claim the same path, whoever pushed first wins, decided from git history.
 - **Status.** One command shows who is doing what, claim conflicts, ready tasks, messages for you and others' recent commits. It runs automatically at session start.
 - **Task queue.** One file per task, with blockers, so agents pull the next ready task themselves.
-- **Messages.** `@name` or `@all` messages, shown automatically on your next prompt.
+- **Messages.** `@name` or `@all` messages, shown automatically on your next prompt, or mid-turn after the agent's next tool call.
 - **Stale detection.** Based on push times, not timestamps the agent types in.
 
 See [SKILL.md](SKILL.md) for the protocol the agents follow.
@@ -32,6 +32,12 @@ Add the hooks to `~/.claude/settings.json`. Merge them into any `hooks` you alre
     ],
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "python3 ~/.claude/skills/git-coord/coord.py prompt-hook" }] }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "python3 ~/.claude/skills/git-coord/coord.py tool-hook" }]
+      }
     ]
   }
 }
@@ -50,7 +56,7 @@ Update with `git -C ~/.claude/skills/git-coord pull`.
 
 ## Limits
 
-- **Up to ~30 seconds behind.** The edit hook fetches at most every 30 seconds, so a claim pushed in that window may not be seen until the next fetch. Commits are checked against the same data.
+- **Up to ~30 seconds behind.** The hooks fetch at most every 30 seconds, so a claim or message pushed in that window may not be seen until the next fetch. Commits are checked against the same data. The tool hook fetches in the background, so a new message appears one tool call after the fetch lands, and no tool call waits on the network.
 - **One shared branch.** It's designed for trunk-based work on one shared branch with roughly 2 to 8 agents. Past that, push contention on that branch and status length grow.
 - **Path claims only.** Two agents can still break each other through an interface change in unclaimed code. That's what messages are for.
 

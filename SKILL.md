@@ -13,7 +13,7 @@ All commands below use the script that sits next to this file:
 python3 ~/.claude/skills/git-coord/coord.py <command>
 ```
 
-If the skill is installed somewhere else, use that path instead.
+If the skill is installed somewhere else, use that path instead. On Windows use `python` instead of `python3` (there `python3` is usually a Microsoft Store stub that fails), with the full path, e.g. `python C:/Users/<you>/.claude/skills/git-coord/coord.py <command>`.
 
 ## Setup (once per clone)
 

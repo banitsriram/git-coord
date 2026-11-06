@@ -28,6 +28,13 @@ import time
 FETCH_EVERY = 30        # seconds between fetches
 STALE_AFTER = 2 * 3600  # not idle and no pushes for this long = stale
 SELF = os.path.realpath(__file__)
+WINDOWS = os.name == "nt"
+# Forward slashes work in git's sh (pre-commit hooks), cmd, PowerShell and macOS/Linux shells alike.
+PY = sys.executable.replace("\\", "/") if sys.executable else "python3"
+SELF_SH = SELF.replace("\\", "/")
+CMD = f'"{PY}" "{SELF_SH}"'  # how to run this script on this machine
+HOOK_MARK = "# git-coord guard"
+TEXT = dict(text=True, encoding="utf-8", errors="replace")  # git speaks UTF-8; Windows' default codepage doesn't
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
 TEMPLATE = """# {name}
 status: idle          # working | blocked | paused | idle
@@ -39,7 +46,7 @@ messages:
 
 
 def git(cwd, *args):
-    r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, **TEXT)
     return r.stdout.strip() if r.returncode == 0 else None
 
 
@@ -134,8 +141,10 @@ class Coord:
         if force or not os.path.exists(stamp) or time.time() - os.path.getmtime(stamp) > FETCH_EVERY:
             open(stamp, "w").close()
             if background:
-                subprocess.Popen(["git", "fetch", "-q"], cwd=self.root, start_new_session=True,
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                extra = ({"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+                         if WINDOWS else {"start_new_session": True})
+                subprocess.Popen(["git", "fetch", "-q"], cwd=self.root, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **extra)
             else:
                 subprocess.run(["git", "fetch", "-q"], cwd=self.root, capture_output=True)
         for f in (self.g("ls-tree", "--name-only", self.up, ".coord/") or "").splitlines():
@@ -186,7 +195,7 @@ class Coord:
     def check(self, rel):
         """Why I may not edit rel, or None if I may."""
         if not self.me:
-            return f"this repo uses git-coord but this clone has no agent name. Ask the user for one, then run: python3 {SELF} init <name>"
+            return f"this repo uses git-coord but this clone has no agent name. Ask the user for one, then run: {CMD} init <name>"
         if rel == f".coord/{self.me}.md" or rel.startswith(".coord/tasks/"):
             return None
         if rel.startswith(".coord/"):
@@ -219,13 +228,13 @@ class Coord:
         """Messages for me not shown before; remembers what was shown."""
         path = self.gitpath("coord-seen")
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 seen = set(f.read().split())
         except OSError:
             seen = set()
         msgs = self.messages()
         keys = [hashlib.sha1(f"{n}\0{m}".encode()).hexdigest()[:16] for n, m in msgs]
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(keys))
         return [msg for msg, k in zip(msgs, keys) if k not in seen]
 
@@ -302,12 +311,12 @@ def publish(c, msg):
     c.g("add", "-A", "--", *paths)
     if not c.ok("diff", "--cached", "--quiet", "--", *paths):
         r = subprocess.run(["git", "commit", "-q", "-m", f"coord({c.me}): {msg}", "--", *paths],
-                           cwd=c.root, capture_output=True, text=True)
+                           cwd=c.root, capture_output=True, **TEXT)
         if r.returncode:
             print(r.stderr or r.stdout)
             return 1
     for _ in range(3):
-        r = subprocess.run(["git", "pull", "-q", "--rebase", "--autostash"], cwd=c.root, capture_output=True, text=True)
+        r = subprocess.run(["git", "pull", "-q", "--rebase", "--autostash"], cwd=c.root, capture_output=True, **TEXT)
         if r.returncode:
             print(f"pull failed:\n{r.stderr}\nIf the conflict is in another agent's file: git rebase --abort, then message them.")
             return 1
@@ -331,18 +340,22 @@ def init(name):
     f = os.path.join(c.root, ".coord", f"{name}.md")
     if not os.path.exists(f):
         os.makedirs(os.path.dirname(f), exist_ok=True)
-        with open(f, "w") as fh:
+        with open(f, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(TEMPLATE.format(name=name))
-    hook, line = c.gitpath("hooks/pre-commit"), f'python3 "{SELF}" pre-commit || exit 1'
+    # The guard calls this machine's own Python by full path: on Windows `python3` is usually
+    # the Microsoft Store stub, which fails and would block every commit.
+    hook, line = c.gitpath("hooks/pre-commit"), f"{CMD} pre-commit || exit 1"
+    existing = None
     if os.path.exists(hook):
-        with open(hook) as fh:
-            if SELF not in fh.read():
-                print(f"A pre-commit hook already exists at {hook}. Add this line to it:\n  {line}")
-    else:
+        with open(hook, encoding="utf-8", errors="replace") as fh:
+            existing = fh.read()
+    if existing is None or HOOK_MARK in existing:  # none yet, or ours: (re)write it
         os.makedirs(os.path.dirname(hook), exist_ok=True)
-        with open(hook, "w") as fh:
-            fh.write(f"#!/bin/sh\n{line}\n")
+        with open(hook, "w", encoding="utf-8", newline="\n") as fh:  # LF: a CRLF shebang breaks sh
+            fh.write(f"#!/bin/sh\n{HOOK_MARK}\n{line}\n")
         os.chmod(hook, 0o755)
+    elif "coord.py" not in existing:
+        print(f"A pre-commit hook already exists at {hook}. Add this line to it:\n  {line}")
     if not c.up:
         print("No upstream branch yet: push with `git push -u origin <branch>`, then run publish.")
         return 0
@@ -361,7 +374,7 @@ def edit_hook(data):
     c = Coord(d)
     if not c.load():
         return 0
-    rel = os.path.relpath(path, c.root)
+    rel = os.path.relpath(path, c.root).replace(os.sep, "/")  # claims and git use "/"; Windows gives "\"
     if c.ok("check-ignore", "-q", rel):
         return 0
     msg = c.check(rel)
@@ -385,6 +398,11 @@ def pre_commit():
 
 
 def main(argv):
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:  # hook JSON and messages are UTF-8; Windows consoles default to a legacy codepage
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     cmd = argv[1] if len(argv) > 1 else "status"
     data = {}
     if cmd.endswith("-hook"):

@@ -43,7 +43,20 @@ Add the hooks to `~/.claude/settings.json`. Merge them into any `hooks` you alre
 }
 ```
 
-The hooks do nothing in repos that don't use git-coord, so they're safe to install globally. They need `python3` (3.9+) and `git`.
+The hooks do nothing in repos that don't use git-coord, so they're safe to install globally. They need Python 3.9+ and `git`.
+
+### Windows
+
+The same, with two changes to every hook command:
+
+- **Use `python`, not `python3`.** On Windows `python3` is usually the Microsoft Store stub, which exits with an error.
+- **Use the full path, with forward slashes**, since `~` isn't expanded in every Windows shell:
+
+```json
+"command": "python C:/Users/<you>/.claude/skills/git-coord/coord.py edit-hook"
+```
+
+Mac/Linux and Windows clones work together on one repo: claims and `.coord` files always use `/` paths and LF line endings, and the pre-commit guard calls each machine's own Python by its full path.
 
 Update with `git -C ~/.claude/skills/git-coord pull`.
 
@@ -52,7 +65,7 @@ Update with `git -C ~/.claude/skills/git-coord pull`.
 1. Give each agent its own clone. Never run two agents in one folder.
 2. Add this line to the project's CLAUDE.md:
    `This repo is shared with other Claude agents. Use the git-coord skill.`
-3. In each clone, run `python3 ~/.claude/skills/git-coord/coord.py init <name>`, or let the agent do it. This also installs a git pre-commit guard, which catches edits made through the shell and by humans.
+3. In each clone, run `python3 ~/.claude/skills/git-coord/coord.py init <name>` (Windows: `python` and the full path), or let the agent do it. This also installs a git pre-commit guard, which catches edits made through the shell and by humans. If Python moves or is upgraded, run `init <name>` again to refresh the guard.
 
 ## Limits
 

@@ -58,6 +58,8 @@ Claim the narrowest set of paths that covers the task. Hot shared files (package
 
 Need to edit a file you didn't plan on? Claim it first, same steps.
 
+If the `check_claims.py` hook is installed, it enforces this: an edit is blocked unless the file is in your *published* claims and in no one else's. A block message names the rule you hit. Follow it; don't try to get around it with shell commands.
+
 ## Commit and push work
 
 - Small, complete commits that build. Prefix messages with your name: `alpha: add login validation`.

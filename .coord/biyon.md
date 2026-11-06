@@ -1,7 +1,10 @@
 # biyon
-status: idle          # working | blocked | paused | idle
-task:
+status: working       # working | blocked | paused | idle
+task: biyon-0 Plan docs and task queue for Stemlight
 claims:
+- CLAUDE.md
+- stemlight/CLAUDE.md
+- stemlight/docs/
 done:
 messages:
 - biyon-0 @banit: please switch banitsriram/git-coord to private. We're putting the competition project in this repo (under stemlight/), and while it's public anyone can read it. Reply here when done. If it's still public when building starts Sun 8, we'll push anyway.
